@@ -2,7 +2,7 @@ import Head from 'next/head';
 import { useState } from 'react';
 import Header from '../components/Header';
 
-const MIN_CHARS = 200;
+const MIN_WORDS = 200;
 
 export default function Home() {
   const [resumeText, setResumeText] = useState('');
@@ -11,8 +11,8 @@ export default function Home() {
   const [error, setError] = useState('');
   const [validationError, setValidationError] = useState('');
 
-  const charCount = resumeText.length;
-  const isReady = charCount >= MIN_CHARS;
+  const wordCount = resumeText.trim() === '' ? 0 : resumeText.trim().split(/\s+/).length;
+  const isReady = wordCount >= MIN_WORDS;
 
   const handleTextChange = (e) => {
     setResumeText(e.target.value);
@@ -21,7 +21,7 @@ export default function Home() {
 
   const handleRoast = async () => {
     if (!isReady) {
-      setValidationError(`Add ${MIN_CHARS - charCount} more characters — that barely qualifies as a bio.`);
+      setValidationError(`Add ${MIN_WORDS - wordCount} more words — that barely qualifies as a bio.`);
       return;
     }
 
@@ -66,13 +66,13 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>Resume Roaster 🔥 — AI-Powered Brutal Honest Feedback</title>
+        <title>Resume Roaster — AI-Powered Brutally Honest Feedback</title>
         <meta
           name="description"
           content="Paste your resume and get witty, brutally honest AI feedback in seconds. Stop sending bad resumes. Get roasted. Get hired."
         />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔥</text></svg>" />
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>" />
       </Head>
 
       <div className="page-wrapper">
@@ -111,7 +111,7 @@ export default function Home() {
 
               <div className="textarea-meta">
                 <span className={`char-count ${isReady ? 'ready' : ''}`}>
-                  {isReady ? '✓' : charCount} {isReady ? 'Ready to roast!' : `/ ${MIN_CHARS} min`}
+                  {isReady ? '✓' : wordCount} {isReady ? 'Ready to roast!' : `/ ${MIN_WORDS} words min`}
                 </span>
                 {validationError && (
                   <span className="validation-error" role="alert">
@@ -134,7 +134,7 @@ export default function Home() {
                       Roasting your resume…
                     </>
                   ) : (
-                    '🔥 Roast My Resume'
+                    'Roast My Resume'
                   )}
                 </span>
               </button>
@@ -153,7 +153,7 @@ export default function Home() {
               <div id="results" className="results-section">
                 <div className="results-card">
                   <div className="results-header">
-                    <span className="results-icon">🔥</span>
+                    <span className="results-icon">📝</span>
                     <div>
                       <h2 className="results-title">Your Roast is Ready</h2>
                       <p className="results-subtitle">Brutally honest. Genuinely useful.</p>
@@ -176,7 +176,7 @@ export default function Home() {
         </main>
 
         <footer className="site-footer">
-          <p>Built with Next.js &amp; Claude claude-sonnet-4-5 · <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer">Powered by Anthropic</a></p>
+          <p>&copy; {new Date().getFullYear()} Resume Roaster. All rights reserved.</p>
         </footer>
       </div>
     </>

@@ -13,15 +13,17 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'resumeText is required.' });
   }
 
-  if (resumeText.trim().length < 200) {
-    return res
-      .status(400)
-      .json({ error: 'Resume must be at least 200 characters. Paste the full text.' });
+  const wordCount = resumeText.trim() === '' ? 0 : resumeText.trim().split(/\s+/).length;
+
+  if (wordCount < 200) {
+    return res.status(400).json({
+      error: 'Resume must be at least 200 words. Paste the full text.',
+    });
   }
 
   try {
     const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5',
+      model: 'claude-3-5-sonnet-latest',
       max_tokens: 1024,
       messages: [
         {
@@ -45,6 +47,10 @@ ${resumeText}`,
 
     if (error.status === 401) {
       return res.status(500).json({ error: 'Invalid API key. Check your ANTHROPIC_API_KEY.' });
+    }
+
+    if (error.status === 429) {
+      return res.status(500).json({ error: 'Rate limit hit. Wait a moment and try again.' });
     }
 
     return res.status(500).json({
