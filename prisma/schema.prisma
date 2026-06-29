@@ -1,0 +1,6 @@
+// Demo Prisma schema
+// Replace with your actual schema
+model Demo {
+  id    Int    @id @default(autoincrement())
+  name  String
+}
