@@ -8,6 +8,7 @@ export default function Home() {
   const [resumeText, setResumeText] = useState('');
   const [roast, setRoast] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
   const [validationError, setValidationError] = useState('');
 
@@ -17,6 +18,37 @@ export default function Home() {
   const handleTextChange = (e) => {
     setResumeText(e.target.value);
     if (validationError) setValidationError('');
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setPdfLoading(true);
+    setError('');
+    setValidationError('');
+
+    try {
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type || 'application/pdf' },
+        body: file,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || 'Failed to parse file.');
+        return;
+      }
+
+      setResumeText(data.text);
+    } catch (err) {
+      setError('Error reading file.');
+    } finally {
+      setPdfLoading(false);
+      e.target.value = '';
+    }
   };
 
   const handleRoast = async () => {
@@ -97,7 +129,7 @@ export default function Home() {
           {/* ── Roast Card ── */}
           <section id="roast-section" className="container">
             <div className="roast-card">
-              <p className="card-label">Step 1 — Paste your resume</p>
+              <p className="card-label">Step 1 — Paste your resume or upload document</p>
 
               <textarea
                 id="resume-input"
@@ -106,18 +138,39 @@ export default function Home() {
                 value={resumeText}
                 onChange={handleTextChange}
                 aria-label="Resume text input"
-                disabled={loading}
+                disabled={loading || pdfLoading}
               />
 
               <div className="textarea-meta">
-                <span className={`char-count ${isReady ? 'ready' : ''}`}>
-                  {isReady ? '✓' : wordCount} {isReady ? 'Ready to roast!' : `/ ${MIN_WORDS} words min`}
-                </span>
-                {validationError && (
-                  <span className="validation-error" role="alert">
-                    ⚠ {validationError}
+                <label htmlFor="file-upload" className={`upload-label-btn ${pdfLoading ? 'loading' : ''}`}>
+                  {pdfLoading ? (
+                    <>
+                      <span className="spinner" style={{ borderColor: 'rgba(37,99,235,0.3)', borderTopColor: '#2563eb', width: '12px', height: '12px' }} />
+                      Reading document...
+                    </>
+                  ) : (
+                    '📄 Upload PDF / Image'
+                  )}
+                  <input
+                    type="file"
+                    id="file-upload"
+                    accept=".pdf, image/*"
+                    onChange={handleFileUpload}
+                    disabled={loading || pdfLoading}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+
+                <div className="meta-right-flex">
+                  {validationError && (
+                    <span className="validation-error" role="alert" style={{ marginRight: '16px' }}>
+                      ⚠ {validationError}
+                    </span>
+                  )}
+                  <span className={`char-count ${isReady ? 'ready' : ''}`}>
+                    {isReady ? '✓ Ready to roast!' : `${wordCount}/${MIN_WORDS} words minimum`}
                   </span>
-                )}
+                </div>
               </div>
 
               <button

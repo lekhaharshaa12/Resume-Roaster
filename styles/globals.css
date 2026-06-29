@@ -232,8 +232,16 @@ body::after {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 10px;
-  font-size: 0.8rem;
+  margin-top: 12px;
+  font-size: 0.82rem;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.meta-right-flex {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
 }
 
 .char-count {
@@ -430,3 +438,35 @@ body::after {
   .hero { padding: 80px 16px 48px; }
   .nav-inner { padding: 14px 16px; }
 }
+
+
+
+.upload-label-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 50px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background-color 0.2s, box-shadow 0.2s;
+  user-select: none;
+}
+
+.upload-label-btn:hover:not(.loading) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background-color: var(--bg-card);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.05);
+}
+
+.upload-label-btn.loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+

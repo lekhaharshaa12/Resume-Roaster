@@ -1,6 +1,15 @@
-// Demo Prisma schema
-// Replace with your actual schema
-model Demo {
-  id    Int    @id @default(autoincrement())
-  name  String
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Roast {
+  id          String   @id @default(uuid())
+  resumeText  String   @db.Text
+  roastText   String   @db.Text
+  createdAt   DateTime @default(now())
 }
