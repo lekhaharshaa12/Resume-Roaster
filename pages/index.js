@@ -24,6 +24,7 @@ export default function Home() {
     const file = e.target.files[0];
     if (!file) return;
 
+    setResumeText(''); // Clear existing text immediately
     setPdfLoading(true);
     setError('');
     setValidationError('');
