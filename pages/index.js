@@ -1,5 +1,5 @@
 import Head from 'next/head';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import Header from '../components/Header';
 
 const MIN_WORDS = 200;
@@ -18,6 +18,10 @@ export default function Home() {
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState('');
+
+  // ── Copy state & Abort Controller Ref ───────────────────────────────────────
+  const [copied, setCopied] = useState(false);
+  const abortControllerRef = useRef(null);
 
   const wordCount = resumeText.trim() === '' ? 0 : resumeText.trim().split(/\s+/).length;
   const isReady = wordCount >= MIN_WORDS;
@@ -59,11 +63,28 @@ export default function Home() {
     }
   };
 
+  const handleCancelStream = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLoading(false);
+    setError('Generation stopped by user.');
+  };
+
   const handleRoast = async () => {
     if (!isReady) {
       setValidationError(`Add ${MIN_WORDS - wordCount} more words — that barely qualifies as a bio.`);
       return;
     }
+
+    // Cancel any previous requests
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setLoading(true);
     setError('');
@@ -73,41 +94,89 @@ export default function Home() {
     setChatError('');
 
     try {
-      const response = await fetch('/api/roast', {
+      const response = await fetch('/api/roast-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resumeText }),
+        signal: controller.signal,
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        setError(data.error || 'Something went wrong. Please try again.');
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.error || 'Something went wrong. Please try again.');
+        setLoading(false);
         return;
       }
 
-      setRoast(data.roast);
-      setConversationId(data.conversationId);
+      // Scroll to results section immediately so the user sees the start of streaming
+      setTimeout(() => {
+        document.getElementById('results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
 
-      // Populate chat history with the initial assistant roast turn
-      if (data.conversationId) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let streamRoastText = '';
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+
+        // Preserve the last (potentially partial) line in the buffer
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          if (trimmed.startsWith('data: ')) {
+            const dataStr = trimmed.slice(6).trim();
+            if (dataStr === '[DONE]') {
+              break;
+            }
+
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.conversationId) {
+                setConversationId(parsed.conversationId);
+              }
+              if (parsed.text) {
+                streamRoastText += parsed.text;
+                setRoast(streamRoastText);
+              }
+              if (parsed.error) {
+                setError(parsed.error);
+                break;
+              }
+            } catch (e) {
+              // Ignore partial JSON parse errors during stream chunking
+            }
+          }
+        }
+      }
+
+      // Set chat messages history once complete
+      if (streamRoastText) {
         setChatMessages([
           {
             role: 'assistant',
-            content: data.roast,
+            content: streamRoastText,
             createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
       }
-
-      // Scroll to results
-      setTimeout(() => {
-        document.getElementById('results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
     } catch (err) {
+      if (err.name === 'AbortError') {
+        // Ignore user-triggered aborts
+        return;
+      }
       setError('Network error — check your connection and try again.');
     } finally {
       setLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -160,7 +229,17 @@ export default function Home() {
     }
   };
 
+  const handleCopyRoast = () => {
+    navigator.clipboard.writeText(roast);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const handleReset = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     setRoast('');
     setConversationId(null);
     setChatMessages([]);
@@ -252,15 +331,14 @@ export default function Home() {
               <button
                 id="roast-button"
                 className="roast-btn"
-                onClick={handleRoast}
-                disabled={loading}
+                onClick={loading ? handleCancelStream : handleRoast}
                 aria-busy={loading}
               >
                 <span className="btn-inner">
                   {loading ? (
                     <>
                       <span className="spinner" aria-hidden="true" />
-                      Roasting your resume…
+                      Stop Generating
                     </>
                   ) : (
                     'Roast My Resume'
@@ -278,7 +356,7 @@ export default function Home() {
             )}
 
             {/* ── Results ── */}
-            {roast && (
+            {(roast || (loading && !roast)) && (
               <div id="results" className="results-section">
                 <div className="results-card">
                   <div className="results-header">
@@ -288,11 +366,18 @@ export default function Home() {
                       <p className="results-subtitle">Brutally honest. Genuinely useful.</p>
                     </div>
                   </div>
-                  <p className="roast-text">{roast}</p>
+                  <p className="roast-text">
+                    {roast || (
+                      <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                        Waiting for response stream...
+                      </span>
+                    )}
+                    {loading && roast && <span className="streaming-cursor">▊</span>}
+                  </p>
                 </div>
 
                 {/* ── Follow-up Chat ── */}
-                {conversationId && (
+                {conversationId && !loading && (
                   <div className="chat-container">
                     <div className="chat-header">
                       <h3 className="chat-header-title">💬 Have questions about your roast?</h3>
@@ -342,16 +427,21 @@ export default function Home() {
                   </div>
                 )}
 
-                <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center' }}>
-                  <button
-                    id="roast-again-button"
-                    className="retry-btn"
-                    onClick={handleReset}
-                    aria-label="Roast another resume"
-                  >
-                    ↩ Roast Another Resume
-                  </button>
-                </div>
+                {!loading && (
+                  <div style={{ marginTop: '24px', display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                    <button className="retry-btn" onClick={handleCopyRoast}>
+                      {copied ? '✓ Copied!' : '📋 Copy Roast'}
+                    </button>
+                    <button
+                      id="roast-again-button"
+                      className="retry-btn"
+                      onClick={handleReset}
+                      aria-label="Roast another resume"
+                    >
+                      ↩ Roast Another Resume
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </section>

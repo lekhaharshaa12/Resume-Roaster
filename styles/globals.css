@@ -606,3 +606,19 @@ body::after {
   font-size: 0.85rem;
 }
 
+/* ─── Streaming Cursor Effect ───────────────────────────────────── */
+.streaming-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  background-color: var(--accent);
+  margin-left: 4px;
+  animation: pulseCursor 0.8s infinite alternate;
+}
+
+@keyframes pulseCursor {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+

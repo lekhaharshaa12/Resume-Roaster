@@ -107,7 +107,73 @@ export async function chatWithGroq(messages, options = {}) {
   }
 }
 
+// ── Streaming Groq service ───────────────────────────────────────────────────
+
+/**
+ * Streams a conversation from Groq and writes the chunks directly to the HTTP response
+ * using Server-Sent Events (SSE).
+ *
+ * @param {Array<{ role: 'user'|'assistant'|'system', content: string }>} messages
+ * @param {object} res Node.js Response object to write the event stream into
+ * @param {object} [options]
+ * @param {string} [options.model]       Override the default Groq model.
+ * @param {number} [options.maxTokens]   Override the default token limit.
+ * @param {number} [options.temperature] Sampling temperature (0–1).
+ */
+export async function streamChatWithGroq(messages, res, options = {}) {
+  const {
+    model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    maxTokens = parseInt(process.env.GROQ_MAX_TOKENS || '1024', 10),
+    temperature = 0.85,
+  } = options;
+
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) {
+    throw new Error('GROQ_API_KEY is not configured.');
+  }
+
+  const groqClient = new Groq({ apiKey: groqKey, timeout: 30_000 });
+
+  // 1. Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Content-Encoding', 'none'); // Prevents buffering in some reverse proxies/Vercel
+  res.flushHeaders();
+
+  try {
+    const stream = await groqClient.chat.completions.create({
+      model,
+      messages,
+      max_tokens: maxTokens,
+      temperature,
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      // If the client aborted the request or connection dropped, stop iterating
+      if (res.writableEnded || res.finished || res.destroyed) {
+        break;
+      }
+
+      const text = chunk.choices[0]?.delta?.content || '';
+      if (text) {
+        // SSE format: prefixed with "data: " and followed by double newline
+        res.write(`data: ${JSON.stringify({ text })}\n\n`);
+      }
+    }
+  } catch (error) {
+    console.error('[Groq Stream] Error in stream generation:', error);
+    const { message } = categoriseError(error);
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+  } finally {
+    res.write('data: [DONE]\n\n');
+    res.end();
+  }
+}
+
 // ── Provider auto-selector ────────────────────────────────────────────────────
+
 
 /**
  * Returns true when a valid Groq API key is present in the environment.
