@@ -12,6 +12,13 @@ export default function Home() {
   const [error, setError] = useState('');
   const [validationError, setValidationError] = useState('');
 
+  // ── Chat State ──────────────────────────────────────────────────────────────
+  const [conversationId, setConversationId] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState('');
+
   const wordCount = resumeText.trim() === '' ? 0 : resumeText.trim().split(/\s+/).length;
   const isReady = wordCount >= MIN_WORDS;
 
@@ -61,6 +68,9 @@ export default function Home() {
     setLoading(true);
     setError('');
     setRoast('');
+    setConversationId(null);
+    setChatMessages([]);
+    setChatError('');
 
     try {
       const response = await fetch('/api/roast', {
@@ -77,6 +87,18 @@ export default function Home() {
       }
 
       setRoast(data.roast);
+      setConversationId(data.conversationId);
+
+      // Populate chat history with the initial assistant roast turn
+      if (data.conversationId) {
+        setChatMessages([
+          {
+            role: 'assistant',
+            content: data.roast,
+            createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+      }
 
       // Scroll to results
       setTimeout(() => {
@@ -89,10 +111,63 @@ export default function Home() {
     }
   };
 
+  const handleSendChatMessage = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || chatLoading || !conversationId) return;
+
+    const userMsg = chatInput.trim();
+    setChatInput('');
+    setChatError('');
+    setChatLoading(true);
+
+    // Optimistically add user's message to the list
+    const userTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setChatMessages((prev) => [
+      ...prev,
+      { role: 'user', content: userMsg, createdAt: userTime },
+    ]);
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId, userMessage: userMsg }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setChatError(data.error || 'Failed to get follow-up response.');
+        return;
+      }
+
+      const assistantTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setChatMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: data.reply, createdAt: assistantTime },
+      ]);
+    } catch (err) {
+      setChatError('Network error. Failed to send message.');
+    } finally {
+      setChatLoading(false);
+      // Scroll chat list to bottom
+      setTimeout(() => {
+        const chatList = document.getElementById('chat-messages-box');
+        if (chatList) {
+          chatList.scrollTop = chatList.scrollHeight;
+        }
+      }, 50);
+    }
+  };
+
   const handleReset = () => {
     setRoast('');
+    setConversationId(null);
+    setChatMessages([]);
+    setChatInput('');
     setError('');
     setValidationError('');
+    setChatError('');
     document.getElementById('roast-section')?.scrollIntoView({ behavior: 'smooth' });
   };
 
@@ -216,14 +291,67 @@ export default function Home() {
                   <p className="roast-text">{roast}</p>
                 </div>
 
-                <button
-                  id="roast-again-button"
-                  className="retry-btn"
-                  onClick={handleReset}
-                  aria-label="Roast another resume"
-                >
-                  ↩ Roast Another Resume
-                </button>
+                {/* ── Follow-up Chat ── */}
+                {conversationId && (
+                  <div className="chat-container">
+                    <div className="chat-header">
+                      <h3 className="chat-header-title">💬 Have questions about your roast?</h3>
+                      <p className="chat-header-subtitle">Ask follow-up questions strictly about your resume details</p>
+                    </div>
+
+                    <div id="chat-messages-box" className="chat-messages">
+                      {chatMessages.map((msg, idx) => (
+                        <div key={idx} className={`chat-message ${msg.role}`}>
+                          <div className="chat-message-content">{msg.content}</div>
+                          <div className="chat-timestamp">{msg.createdAt}</div>
+                        </div>
+                      ))}
+                      {chatLoading && (
+                        <div className="chat-message assistant">
+                          <div className="btn-inner" style={{ color: 'var(--text-secondary)' }}>
+                            <span className="spinner" style={{ borderColor: 'rgba(0,0,0,0.1)', borderTopColor: 'var(--text-secondary)', width: '12px', height: '12px' }} />
+                            Thinking...
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {chatError && (
+                      <div className="chat-error-banner" role="alert">
+                        ⚠️ {chatError}
+                      </div>
+                    )}
+
+                    <form onSubmit={handleSendChatMessage} className="chat-input-wrapper">
+                      <input
+                        type="text"
+                        className="chat-input"
+                        placeholder="e.g. How can I rewrite my experience section to sound more impressive?"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        disabled={chatLoading}
+                      />
+                      <button
+                        type="submit"
+                        className="chat-send-btn"
+                        disabled={chatLoading || !chatInput.trim()}
+                      >
+                        Send
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center' }}>
+                  <button
+                    id="roast-again-button"
+                    className="retry-btn"
+                    onClick={handleReset}
+                    aria-label="Roast another resume"
+                  >
+                    ↩ Roast Another Resume
+                  </button>
+                </div>
               </div>
             )}
           </section>

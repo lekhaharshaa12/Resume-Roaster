@@ -1,6 +1,5 @@
 const pdfParse = require('pdf-parse');
-import anthropic from '../../lib/claude';
-import Groq from 'groq-sdk';
+import { chatWithGroq, groqAvailable } from '../../services/ai';
 
 export const config = {
   api: {
@@ -35,59 +34,29 @@ export default async function handler(req, res) {
     // ── Handle Images (Vision OCR) ──────────────────────────
     if (contentType.startsWith('image/')) {
       const base64Data = buffer.toString('base64');
-      const groqKey = process.env.GROQ_API_KEY;
+      const OCR_INSTRUCTION =
+        'Extract all the plain text from this resume image. ' +
+        'Maintain the layout, headings, and structure as closely as possible. ' +
+        'Do not add any conversational introduction, notes, or commentary. ' +
+        'Output only the extracted resume text.';
 
-      if (groqKey && !groqKey.includes('your-key') && groqKey.startsWith('gsk_')) {
-        // Use Groq Llama 3.2 Vision (11B)
-        const groq = new Groq({ apiKey: groqKey });
-        const response = await groq.chat.completions.create({
-          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: 'Extract all the plain text from this resume image. Maintain the layout, headings, and structure as closely as possible. Do not add any conversational introduction, notes, or commentary. Output only the extracted resume text.',
-                },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: `data:${contentType};base64,${base64Data}`,
-                  },
-                },
-              ],
-            },
-          ],
-        });
-        extractedText = response.choices[0]?.message?.content || '';
-      } else {
-        // Fallback: Use Claude 3.5 Sonnet Vision
-        const message = await anthropic.messages.create({
-          model: 'claude-3-5-sonnet-latest',
-          max_tokens: 1024,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: 'Extract all the plain text from this resume image. Maintain the layout, headings, and structure as closely as possible. Do not add any conversational introduction, notes, or commentary. Output only the extracted resume text.',
-                },
-                {
-                  type: 'image',
-                  source: {
-                    type: 'base64',
-                    media_type: contentType,
-                    data: base64Data,
-                  },
-                },
-              ],
-            },
-          ],
-        });
-        extractedText = message.content[0].text || '';
+      if (!groqAvailable()) {
+        return res.status(500).json({ error: 'AI vision service is currently misconfigured. Missing Groq API key.' });
       }
+
+      // Use Groq Llama 4 Scout Vision via chatWithGroq
+      extractedText = await chatWithGroq([
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: OCR_INSTRUCTION },
+            {
+              type: 'image_url',
+              image_url: { url: `data:${contentType};base64,${base64Data}` },
+            },
+          ],
+        },
+      ], { model: 'meta-llama/llama-4-scout-17b-16e-instruct' });
     } 
     // ── Handle PDFs ────────────────────────────────────────────────
     else if (contentType === 'application/pdf') {

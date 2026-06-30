@@ -1,5 +1,5 @@
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -7,9 +7,32 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// A Conversation is created the moment a resume is submitted.
+// It groups the initial roast + all follow-up chat turns.
+model Conversation {
+  id        String    @id @default(uuid())
+  createdAt DateTime  @default(now())
+  roast     Roast?
+  messages  Message[]
+}
+
+// Every turn in a conversation — both user and assistant — is stored here.
+// role is "user" or "assistant".
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  role           String
+  content        String       @db.Text
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+}
+
+// The original roast record, now linked to a Conversation.
 model Roast {
-  id          String   @id @default(uuid())
-  resumeText  String   @db.Text
-  roastText   String   @db.Text
-  createdAt   DateTime @default(now())
+  id             String       @id @default(uuid())
+  conversationId String       @unique
+  resumeText     String       @db.Text
+  roastText      String       @db.Text
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
 }
