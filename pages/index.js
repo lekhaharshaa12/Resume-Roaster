@@ -19,8 +19,7 @@ export default function Home() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState('');
 
-  // ── Copy state & Abort Controller Ref ───────────────────────────────────────
-  const [copied, setCopied] = useState(false);
+  // ── Abort Controller Ref ───────────────────────────────────────────────────
   const abortControllerRef = useRef(null);
 
   const wordCount = resumeText.trim() === '' ? 0 : resumeText.trim().split(/\s+/).length;
@@ -69,7 +68,21 @@ export default function Home() {
       abortControllerRef.current = null;
     }
     setLoading(false);
-    setError('Generation stopped by user.');
+
+    // Remove the placeholder streaming message from chat history
+    setChatMessages((prev) => {
+      const updated = [...prev];
+      if (updated.length > 0) {
+        const last = updated[updated.length - 1];
+        if (last.role === 'assistant' && !last.content) {
+          updated.pop();
+        } else if (last.role === 'assistant') {
+          last.isStreaming = false;
+          last.content += '\n\n[Generation stopped by user]';
+        }
+      }
+      return updated;
+    });
   };
 
   const handleRoast = async () => {
@@ -89,15 +102,35 @@ export default function Home() {
     setLoading(true);
     setError('');
     setRoast('');
-    setConversationId(null);
-    setChatMessages([]);
     setChatError('');
+
+    const currentWordCount = wordCount;
+    setResumeText(''); // Clear textarea for next upload
+
+    const userTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const assistantTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Append user request and placeholder assistant message to the chat list below
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        role: 'user',
+        content: `📝 Submitted Resume for Roast (${currentWordCount} words)`,
+        createdAt: userTime,
+      },
+      {
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        createdAt: assistantTime,
+      },
+    ]);
 
     try {
       const response = await fetch('/api/roast-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ resumeText }),
+        body: JSON.stringify({ resumeText, conversationId }),
         signal: controller.signal,
       });
 
@@ -105,10 +138,11 @@ export default function Home() {
         const errorData = await response.json().catch(() => ({}));
         setError(errorData.error || 'Something went wrong. Please try again.');
         setLoading(false);
+        setChatMessages((prev) => prev.slice(0, -2));
         return;
       }
 
-      // Scroll to results section immediately so the user sees the start of streaming
+      // Scroll to results/roast section
       setTimeout(() => {
         document.getElementById('results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 100);
@@ -116,6 +150,7 @@ export default function Home() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let streamRoastText = '';
+      let streamCollectiveText = '';
       let buffer = '';
 
       while (true) {
@@ -124,8 +159,6 @@ export default function Home() {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-
-        // Preserve the last (potentially partial) line in the buffer
         buffer = lines.pop() || '';
 
         for (const line of lines) {
@@ -143,37 +176,61 @@ export default function Home() {
               if (parsed.conversationId) {
                 setConversationId(parsed.conversationId);
               }
+              
+              // 1. Update top roast card with individual roast chunk
               if (parsed.text) {
                 streamRoastText += parsed.text;
                 setRoast(streamRoastText);
               }
+
+              // 2. Update bottom chat box with collective roast chunk
+              if (parsed.collectiveText) {
+                streamCollectiveText += parsed.collectiveText;
+                setChatMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === 'assistant') {
+                    last.content = streamCollectiveText;
+                  }
+                  return updated;
+                });
+              }
+
               if (parsed.error) {
                 setError(parsed.error);
                 break;
               }
             } catch (e) {
-              // Ignore partial JSON parse errors during stream chunking
+              // Ignore partial JSON parsing errors
             }
           }
         }
       }
 
-      // Set chat messages history once complete
-      if (streamRoastText) {
-        setChatMessages([
-          {
-            role: 'assistant',
-            content: streamRoastText,
-            createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          },
-        ]);
-      }
+      // Finalize assistant message in timeline
+      setChatMessages((prev) => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last && last.role === 'assistant') {
+          last.isStreaming = false;
+        }
+        return updated;
+      });
+
+      // Scroll chat list to bottom
+      setTimeout(() => {
+        const chatList = document.getElementById('chat-messages-box');
+        if (chatList) {
+          chatList.scrollTop = chatList.scrollHeight;
+        }
+      }, 50);
+
     } catch (err) {
       if (err.name === 'AbortError') {
-        // Ignore user-triggered aborts
         return;
       }
       setError('Network error — check your connection and try again.');
+      setChatMessages((prev) => prev.slice(0, -2));
     } finally {
       setLoading(false);
       abortControllerRef.current = null;
@@ -189,7 +246,6 @@ export default function Home() {
     setChatError('');
     setChatLoading(true);
 
-    // Optimistically add user's message to the list
     const userTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setChatMessages((prev) => [
       ...prev,
@@ -227,12 +283,6 @@ export default function Home() {
         }
       }, 50);
     }
-  };
-
-  const handleCopyRoast = () => {
-    navigator.clipboard.writeText(roast);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleReset = () => {
@@ -355,9 +405,10 @@ export default function Home() {
               </div>
             )}
 
-            {/* ── Results ── */}
+            {/* ── Results Section ── */}
             {(roast || (loading && !roast)) && (
               <div id="results" className="results-section">
+                {/* ── Roasting Section (Latest Standalone Roast Card) ── */}
                 <div className="results-card">
                   <div className="results-header">
                     <span className="results-icon">📝</span>
@@ -369,26 +420,37 @@ export default function Home() {
                   <p className="roast-text">
                     {roast || (
                       <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                        Waiting for response stream...
+                        Stoking the flames... preparing to incinerate your resume...
                       </span>
                     )}
                     {loading && roast && <span className="streaming-cursor">▊</span>}
                   </p>
                 </div>
 
-                {/* ── Follow-up Chat ── */}
-                {conversationId && !loading && (
+                {/* ── Follow-up Chat Box (Remains & logs all roasts + questions) ── */}
+                {conversationId && (
                   <div className="chat-container">
                     <div className="chat-header">
-                      <h3 className="chat-header-title">💬 Have questions about your roast?</h3>
-                      <p className="chat-header-subtitle">Ask follow-up questions strictly about your resume details</p>
+                      <h3 className="chat-header-title">💬 Roast Discussion & History</h3>
+                      <p className="chat-header-subtitle">Contains all roasts and chat interactions from this session</p>
                     </div>
 
-                    <div id="chat-messages-box" className="chat-messages">
+                    <div id="chat-messages-box" className="chat-messages" style={{ maxHeight: '450px' }}>
                       {chatMessages.map((msg, idx) => (
                         <div key={idx} className={`chat-message ${msg.role}`}>
-                          <div className="chat-message-content">{msg.content}</div>
-                          <div className="chat-timestamp">{msg.createdAt}</div>
+                          <div className="chat-message-content">
+                            {msg.content === '' && msg.isStreaming ? (
+                              <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                Stoking the flames... preparing to incinerate your resume...
+                              </span>
+                            ) : (
+                              msg.content
+                            )}
+                            {msg.isStreaming && msg.content !== '' && <span className="streaming-cursor">▊</span>}
+                          </div>
+                          <div className="chat-timestamp">
+                            <span>{msg.createdAt}</span>
+                          </div>
                         </div>
                       ))}
                       {chatLoading && (
@@ -411,15 +473,15 @@ export default function Home() {
                       <input
                         type="text"
                         className="chat-input"
-                        placeholder="e.g. How can I rewrite my experience section to sound more impressive?"
+                        placeholder="Ask follow-up questions strictly about your resume details..."
                         value={chatInput}
                         onChange={(e) => setChatInput(e.target.value)}
-                        disabled={chatLoading}
+                        disabled={chatLoading || loading}
                       />
                       <button
                         type="submit"
                         className="chat-send-btn"
-                        disabled={chatLoading || !chatInput.trim()}
+                        disabled={chatLoading || loading || !chatInput.trim()}
                       >
                         Send
                       </button>
@@ -428,17 +490,14 @@ export default function Home() {
                 )}
 
                 {!loading && (
-                  <div style={{ marginTop: '24px', display: 'flex', gap: '12px', justifyContent: 'center' }}>
-                    <button className="retry-btn" onClick={handleCopyRoast}>
-                      {copied ? '✓ Copied!' : '📋 Copy Roast'}
-                    </button>
+                  <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center' }}>
                     <button
                       id="roast-again-button"
                       className="retry-btn"
                       onClick={handleReset}
-                      aria-label="Roast another resume"
+                      aria-label="Clear session and start fresh"
                     >
-                      ↩ Roast Another Resume
+                      ↩ Reset & Start Fresh
                     </button>
                   </div>
                 )}
