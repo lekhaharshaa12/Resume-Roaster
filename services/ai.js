@@ -117,3 +117,33 @@ export function groqAvailable() {
   const key = process.env.GROQ_API_KEY || '';
   return key.length > 0 && !key.includes('your-key') && key.startsWith('gsk_');
 }
+
+/**
+ * Stream responses from Groq model.
+ */
+export async function* streamChatWithGroq(messages, options = {}) {
+  const {
+    model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    maxTokens = parseInt(process.env.GROQ_MAX_TOKENS || '1024', 10),
+    temperature = 0.85,
+  } = options;
+
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) {
+    throw new Error('GROQ_API_KEY is not configured.');
+  }
+
+  const groqClient = new Groq({ apiKey: groqKey, timeout: 30_000 });
+
+  const completionStream = await groqClient.chat.completions.create({
+    model,
+    messages,
+    max_tokens: maxTokens,
+    temperature,
+    stream: true,
+  });
+
+  for await (const chunk of completionStream) {
+    yield chunk.choices[0]?.delta?.content || '';
+  }
+}

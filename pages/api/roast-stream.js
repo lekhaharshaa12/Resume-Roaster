@@ -1,29 +1,21 @@
+const pdfParse = require('pdf-parse');
 import prisma from '../../lib/db';
-import { groqAvailable } from '../../services/ai';
-import Groq from 'groq-sdk';
+import { streamChatWithGroq, chatWithGroq, groqAvailable } from '../../services/ai';
+import jwt from 'jsonwebtoken';
 
-const SYSTEM_PROMPT_INDIVIDUAL =
-  'You are a witty but genuinely helpful resume reviewer. ' +
-  'Be funny, be direct, and be harsh — but make every critique actionable. ' +
-  'Point out what is vague, what is missing, what screams "I copied this from a template", ' +
-  'and what would make a hiring manager cringe. ' +
-  'Roast this specific resume individually. Do not mention or compare it with other resumes. ' +
-  'End your roast with a clearly labelled section called "3 Concrete Fixes:" that gives ' +
-  'three specific, actionable improvements the person can make TODAY. ' +
-  'Keep the whole response under 400 words.';
+const ROAST_PROMPT = (resumeText) => `You are a witty, brutally honest resume reviewer with a sharp sense of humor. 
+Your job is to roast the resume below — be funny, be direct, be harsh — but make it genuinely useful. 
+Point out what's vague, what's missing, what screams "I copied this from a template", and what would make a hiring manager cringe.
+End your roast with a clearly labeled section called "3 Concrete Fixes:" that gives three specific, actionable improvements the person can make TODAY.
+Keep the whole response under 400 words.
 
-const SYSTEM_PROMPT_COLLECTIVE =
-  'You are a witty resume reviewer. ' +
-  'Roast and compare all the resumes uploaded in this chat session together. ' +
-  'Provide a constructive, harsh, and funny comparison of their progression/changes ' +
-  'and roast the collection collectively. Tell the user if they are getting better or worse. ' +
-  'End with "3 Overall Steps for Career Growth:" listing actionable advice. ' +
-  'Keep the response under 400 words.';
+Resume:
+${resumeText}`;
 
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: '1mb',
+      sizeLimit: '10mb',
     },
   },
 };
@@ -33,179 +25,136 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed. Use POST.' });
   }
 
-  const { resumeText, conversationId: existingId } = req.body;
+  // 1. Authentication Check
+  const cookies = req.headers.cookie || '';
+  const sessionCookie = cookies
+    .split(';')
+    .find((c) => c.trim().startsWith('session='));
 
-  if (!resumeText || typeof resumeText !== 'string') {
-    return res.status(400).json({ error: 'resumeText is required.' });
+  if (!sessionCookie) {
+    return res.status(401).json({ error: 'Unauthorized. Please sign up or sign in first.' });
   }
 
-  const wordCount = resumeText.trim() === '' ? 0 : resumeText.trim().split(/\s+/).length;
-  if (wordCount < 200) {
-    return res.status(400).json({
-      error: 'Resume must be at least 200 words. Paste the full text.',
-    });
-  }
-
-  if (!groqAvailable()) {
-    return res.status(500).json({ error: 'AI generation service is currently misconfigured. Missing Groq API key.' });
-  }
-
-  let conversationId = existingId || null;
-
-  // 1. Initialize a new Conversation session in database if not provided
-  if (!conversationId) {
-    try {
-      const conversation = await prisma.conversation.create({ data: {} });
-      conversationId = conversation.id;
-    } catch (dbError) {
-      console.error('[Roast Stream] Database session initialization failed:', dbError);
-      return res.status(500).json({ error: 'Failed to initialize session in database.' });
-    }
-  }
-
-  // Set SSE Headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Content-Encoding', 'none');
-  res.flushHeaders();
-
-  // Send conversationId immediately so the frontend knows how to link subsequent roasts
-  res.write(`data: ${JSON.stringify({ conversationId })}\n\n`);
-
-  const userContent = `Please roast my new resume:\n\n${resumeText}`;
-  const groqKey = process.env.GROQ_API_KEY;
-  const groqClient = new Groq({ apiKey: groqKey, timeout: 30_000 });
-  const modelName = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-  const maxTokens = parseInt(process.env.GROQ_MAX_TOKENS || '1024', 10);
-
-  let fullIndividualText = '';
-  let fullCollectiveText = '';
+  const token = sessionCookie.split('=')[1];
+  const secret = process.env.JWT_SECRET || 'fallback_secret_key_change_me';
+  let userId;
 
   try {
-    if (!existingId) {
-      // ── FIRST TURN ──
-      // Individual roast and collective roast are identical because there's only 1 resume.
-      const stream = await groqClient.chat.completions.create({
-        model: modelName,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT_INDIVIDUAL },
-          { role: 'user', content: userContent },
-        ],
-        max_tokens: maxTokens,
-        temperature: 0.85,
-        stream: true,
-      });
+    const decoded = jwt.verify(token, secret);
+    userId = decoded.userId;
+  } catch (err) {
+    return res.status(401).json({ error: 'Session expired. Please sign in again.' });
+  }
 
-      for await (const chunk of stream) {
-        if (res.writableEnded || res.finished || res.destroyed) {
-          break;
+  const { fileData, fileType, resumeText: pastedText } = req.body;
+
+  let textToRoast = '';
+
+  try {
+    // 2. Process attachments if present
+    if (fileData && fileType) {
+      const buffer = Buffer.from(fileData, 'base64');
+
+      if (fileType === 'application/pdf') {
+        const data = await pdfParse(buffer);
+        textToRoast = data.text || '';
+      } else if (fileType.startsWith('image/')) {
+        if (!groqAvailable()) {
+          return res.status(500).json({ error: 'Vision OCR not configured.' });
         }
 
-        const text = chunk.choices[0]?.delta?.content || '';
-        if (text) {
-          fullIndividualText += text;
-          fullCollectiveText += text;
-          // Send to both individual card (text) and chat box (collectiveText)
-          res.write(`data: ${JSON.stringify({ text, collectiveText: text })}\n\n`);
-        }
+        const OCR_INSTRUCTION =
+          'Extract all the plain text from this resume image. ' +
+          'Maintain the layout, headings, and structure as closely as possible. ' +
+          'Do not add any conversational introduction, notes, or commentary. ' +
+          'Output only the extracted resume text.';
+
+        textToRoast = await chatWithGroq([
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: OCR_INSTRUCTION },
+              {
+                type: 'image_url',
+                image_url: { url: `data:${fileType};base64,${fileData}` },
+              },
+            ],
+          },
+        ], { model: 'meta-llama/llama-4-scout-17b-16e-instruct' });
+      } else {
+        return res.status(400).json({ error: 'Unsupported file type attached.' });
       }
     } else {
-      // ── SUBSEQUENT TURNS ──
-      // Generate individual roast and collective roast concurrently in parallel!
-      
-      // Fetch history for the collective roast
-      const pastMessages = await prisma.message.findMany({
-        where: { conversationId: existingId },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-      });
-      pastMessages.reverse();
-
-      const apiHistory = pastMessages.map(msg => ({
-        role: msg.role === 'user' ? 'user' : 'assistant',
-        content: msg.content,
-      }));
-
-      // A. Setup Individual roast call (stateless)
-      const individualPromise = groqClient.chat.completions.create({
-        model: modelName,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT_INDIVIDUAL },
-          { role: 'user', content: userContent },
-        ],
-        max_tokens: maxTokens,
-        temperature: 0.85,
-        stream: true,
-      });
-
-      // B. Setup Collective roast call (with history)
-      const collectivePromise = groqClient.chat.completions.create({
-        model: modelName,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT_COLLECTIVE },
-          ...apiHistory,
-          { role: 'user', content: userContent },
-        ],
-        max_tokens: maxTokens,
-        temperature: 0.85,
-        stream: true,
-      });
-
-      const [individualStream, collectiveStream] = await Promise.all([
-        individualPromise,
-        collectivePromise,
-      ]);
-
-      const readIndividual = async () => {
-        for await (const chunk of individualStream) {
-          if (res.writableEnded || res.finished || res.destroyed) break;
-          const text = chunk.choices[0]?.delta?.content || '';
-          if (text) {
-            fullIndividualText += text;
-            res.write(`data: ${JSON.stringify({ text })}\n\n`);
-          }
-        }
-      };
-
-      const readCollective = async () => {
-        for await (const chunk of collectiveStream) {
-          if (res.writableEnded || res.finished || res.destroyed) break;
-          const text = chunk.choices[0]?.delta?.content || '';
-          if (text) {
-            fullCollectiveText += text;
-            res.write(`data: ${JSON.stringify({ collectiveText: text })}\n\n`);
-          }
-        }
-      };
-
-      await Promise.all([readIndividual(), readCollective()]);
+      textToRoast = pastedText || '';
     }
-  } catch (error) {
-    console.error('[Roast Stream] Streaming error:', error);
-    res.write(`data: ${JSON.stringify({ error: error.message || 'Stream processing failed' })}\n\n`);
-  } finally {
-    // Write [DONE] signal to frontend
-    res.write('data: [DONE]\n\n');
-    res.end();
 
-    // 3. Save transcript to DB
-    if (conversationId && fullIndividualText.trim().length > 0) {
+    // Clean up text
+    textToRoast = textToRoast.replace(/\r\n/g, '\n').replace(/ +/g, ' ').trim();
+
+    if (!textToRoast) {
+      return res.status(400).json({ error: 'Could not extract resume content.' });
+    }
+
+    const wordCount = textToRoast.trim() === '' ? 0 : textToRoast.trim().split(/\s+/).length;
+    if (wordCount < 200) {
+      return res.status(400).json({
+        error: `The parsed resume has only ${wordCount} words. Paste/upload a full resume of at least 200 words.`,
+      });
+    }
+
+    if (!groqAvailable()) {
+      return res.status(500).json({ error: 'AI generation service missing API keys.' });
+    }
+
+    // 3. Set SSE (Server Sent Events) Headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'Content-Encoding': 'none',
+    });
+    res.flushHeaders();
+
+    // 4. Stream response from Groq
+    let fullRoastText = '';
+    let isClientClosed = false;
+
+    req.on('close', () => {
+      isClientClosed = true;
+    });
+
+    const completionStream = streamChatWithGroq([
+      { role: 'user', content: ROAST_PROMPT(textToRoast) },
+    ], { model: 'llama-3.3-70b-versatile' });
+
+    for await (const chunk of completionStream) {
+      if (isClientClosed) {
+        break;
+      }
+      fullRoastText += chunk;
+      res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+    }
+
+    // 5. Complete registration of roast in database on successful finish
+    if (!isClientClosed && fullRoastText.trim().length > 0) {
       try {
-        // Save collective roast to Message logs (since chat logs compare them)
-        await prisma.message.createMany({
-          data: [
-            { conversationId, role: 'user',      content: userContent },
-            { conversationId, role: 'assistant', content: fullCollectiveText },
-          ],
-        });
-        // Save individual roast in Roast log
         await prisma.roast.create({
-          data: { conversationId, resumeText, roastText: fullIndividualText },
+          data: {
+            resumeText: textToRoast,
+            roastText: fullRoastText,
+            userId,
+          },
         });
-      } catch (dbError) {
-        console.error('[Roast Stream] Failed to persist messages to DB:', dbError);
+      } catch (dbErr) {
+        console.error('[Roast Stream] DB Save Error:', dbErr);
       }
     }
+
+    res.write('data: [DONE]\n\n');
+    res.end();
+  } catch (error) {
+    console.error('[Roast Stream] Error:', error);
+    res.write(`data: ${JSON.stringify({ error: error.message || 'Failed to process stream.' })}\n\n`);
+    res.end();
   }
 }
