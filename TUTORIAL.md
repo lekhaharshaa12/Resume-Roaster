@@ -1,75 +1,46 @@
 # 📘 Resume Roaster — Complete Setup Tutorial
 
-This guide takes you through the step-by-step process of configuring, running, and deploying the Resume Roaster web application.
+This guide takes you through the step-by-step process of configuring, running, and deploying the Resume Roaster web application with Supabase Postgres and Groq.
 
 ---
 
-## 🛠️ Step 1 — Local MySQL Database Setup
+## 🛠️ Step 1 — Supabase PostgreSQL Database Setup
 
-1. Open your MySQL client (Workbench, Command Line, or phpMyAdmin).
-2. Connect to your local server instance (typically `localhost:3306`).
-3. Run the following commands to create the database and prepare user privileges for tunneling:
-   ```sql
-   -- Create database
-   CREATE DATABASE resumeroaster;
+Rather than maintaining a local database server, Resume Roaster is powered by a high-performance cloud **Supabase PostgreSQL** instance:
 
-   -- Grant permissions to allow external connections (needed for tunneling)
-   CREATE USER 'harshaa2798'@'%' IDENTIFIED BY 'Sunny0910';
-   GRANT ALL PRIVILEGES ON resumeroaster.* TO 'harshaa2798'@'%';
-   FLUSH PRIVILEGES;
-   ```
-
----
-
-## 🌐 Step 2 — Tunneling MySQL Globally (Pinggy)
-
-To allow hosted backends (like Vercel) to write logs directly to your laptop's MySQL instance:
-
-1. Open **PowerShell** on your computer.
-2. Start an SSH-based TCP tunnel on port `3306` directly to Pinggy (completely free, no card required):
-   ```powershell
-   ssh -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R0:127.0.0.1:3306 tcp@free.pinggy.io
-   ```
-3. Look for the public forward address in the terminal output. It will look like this:
-   `tcp://cslih-104-28-155-21.run.pinggy-free.link:45035`
-4. Update the host and port in your `.env` file with this active tunnel information:
+1. Sign up/Log in at **[supabase.com](https://supabase.com)**.
+2. Click **New Project** and select a name, password, and Region.
+3. Once the project is provisioned, navigate to **Project Settings** ➔ **Database** ➔ **Connection Strings**.
+4. Copy the **URI** connection string. Make sure to choose the connection pooler or direct mode (Prisma works best with the Transaction Connection pooler on port `6543` or standard direct port `5432`).
+5. Replace the placeholder password with your database password.
+6. Paste the URL directly into your `.env` file under `DATABASE_URL`:
    ```env
-   DATABASE_URL="mysql://harshaa2798:Sunny0910@cslih-104-28-155-21.run.pinggy-free.link:45035/resumeroaster"
+   DATABASE_URL="postgresql://postgres.[YOUR_PROJECT_ID]:[YOUR_PASSWORD]@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres"
    ```
 
 ---
 
-## 🔑 Step 3 — AI Provider Credentials
+## 🔑 Step 2 — AI Provider Credentials
 
-The application dynamically toggles between **Groq** and **Claude** based on available keys:
+The application uses **Groq** for high-speed LLM processing and OCR:
 
-### Groq Key (Default & Fast)
 1. Register at **[console.groq.com](https://console.groq.com)**.
-2. Generate an API key (starts with `gsk_`).
+2. Generate a API key (starts with `gsk_`).
 3. Paste it inside `.env`:
    ```env
    GROQ_API_KEY="gsk_xxxxx..."
    ```
-   *This enables `llama-3.3-70b-versatile` for lightning-fast resume roasts and Llama 4 vision model for image OCR uploads.*
-
-### Claude Key (High Quality)
-1. Register at **[console.anthropic.com](https://console.anthropic.com)**.
-2. Obtain an API Key (starts with `sk-ant-`).
-3. Add it to `.env`:
-   ```env
-   ANTHROPIC_API_KEY="sk-ant-xxxxx..."
-   ```
-   *If the Groq key is commented out, the application automatically uses `claude-3-5-sonnet-latest` for roasting and Vision OCR.*
+   *This enables `llama-3.3-70b-versatile` for streaming resume roasts and Llama 4 vision model for image OCR uploads.*
 
 ---
 
-## 🏗️ Step 4 — Sync Schema & Launch
+## 🏗️ Step 3 — Sync Schema & Launch
 
-1. Apply the Prisma schema model to create the database tables:
+1. Apply the Prisma schema model to synchronize your Supabase cloud database:
    ```bash
    npx prisma db push
    ```
-2. Generate client helper files:
+2. Generate Prisma Client bindings:
    ```bash
    npx prisma generate
    ```
@@ -81,11 +52,15 @@ The application dynamically toggles between **Groq** and **Claude** based on ava
 
 ---
 
-## ☁️ Step 5 — Deploying to Vercel
+## ☁️ Step 4 — Deploying to Vercel
 
-1. Install Vercel CLI or connect your GitHub repository directly to Vercel.
-2. Import the project.
-3. Add these exact **Environment Variables** in Vercel settings:
-   - `GROQ_API_KEY` (or `ANTHROPIC_API_KEY`)
-   - `DATABASE_URL` (your active Pinggy tunnel connection string)
-4. Deploy! Your live site will connect directly back to the database running on your laptop.
+1. Push your project code to a GitHub repository.
+2. Connect your GitHub repository directly to **Vercel** ([vercel.com](https://vercel.com)).
+3. Import the project.
+4. Add these exact **Environment Variables** in Vercel settings:
+   - `DATABASE_URL` (Your Supabase PostgreSQL connection string)
+   - `GROQ_API_KEY` (Your Groq API key)
+   - `JWT_SECRET` (A secure random string for JWT sign-in cookies)
+   - `EMAIL_USER` (Your Gmail SMTP username)
+   - `EMAIL_PASS` (Your Gmail SMTP App Password)
+5. Deploy!

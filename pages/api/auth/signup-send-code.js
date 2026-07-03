@@ -42,8 +42,10 @@ export default async function handler(req, res) {
       },
     });
 
-    // Send the email via SMTP (falls back to console if credentials missing)
-    await sendOtpEmail(cleanEmail, code);
+    // Send the email via SMTP in the background so the HTTP response returns immediately
+    sendOtpEmail(cleanEmail, code).catch((mailErr) => {
+      console.error('[Background Mail Error] Failed to send OTP:', mailErr);
+    });
 
     return res.status(200).json({
       message: 'Verification code sent.',
