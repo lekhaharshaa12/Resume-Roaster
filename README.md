@@ -1,6 +1,10 @@
 # 🔥 Resume Roaster
 
+[![Vercel Deployment](https://img.shields.io/badge/Vercel-Deployed-black?style=flat&logo=vercel)](https://vercel.com/lekha-harshaa-s-projects/resume-roaster)
+
 A modern, full-stack AI-powered SaaS application that gives witty, brutally honest, and genuinely useful feedback on resumes. Designed to wow users with rich aesthetics, real-time streaming feedback, multimodal file parsing, and a secure passwordless onboarding experience.
+
+Vercel Project Dashboard: **[https://vercel.com/lekha-harshaa-s-projects/resume-roaster](https://vercel.com/lekha-harshaa-s-projects/resume-roaster)**
 
 ---
 
@@ -78,3 +82,19 @@ npx prisma generate
 npm run dev
 ```
 Open **[http://localhost:3000](http://localhost:3000)** in your browser!
+
+---
+
+## ☁️ Vercel Deployment
+
+This project is configured and deployed live on Vercel:
+*   **Vercel Project Link**: [lekha-harshaa-s-projects/resume-roaster](https://vercel.com/lekha-harshaa-s-projects/resume-roaster)
+
+### How to update and redeploy:
+1.  **Environment Variables**: Ensure the following variables are configured under **Settings ➔ Environment Variables** in your Vercel project dashboard:
+    *   `DATABASE_URL` (Supabase connection string)
+    *   `GROQ_API_KEY` (Groq API credentials)
+    *   `JWT_SECRET` (For signing session cookies)
+    *   `EMAIL_USER` (Sender Gmail address)
+    *   `EMAIL_PASS` (16-character SMTP App password)
+2.  **Trigger builds**: Pushing changes to your main Git branch will automatically trigger a production rebuild and live deployment on Vercel.
