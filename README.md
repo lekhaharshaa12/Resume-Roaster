@@ -45,56 +45,8 @@ Vercel Project Dashboard: **[https://vercel.com/lekha-harshaa-s-projects/resume-
 
 ---
 
-## 🚀 Getting Started
-
-### 1. Clone & Install Dependencies
-```bash
-git clone https://github.com/YOUR_USERNAME/resume-roaster.git
-cd resume-roaster
-npm install
-```
-
-### 2. Configure Environment Variables
-Create a file named `.env` in the root folder:
-```env
-# Supabase PostgreSQL Connection String
-DATABASE_URL="postgresql://postgres.[YOUR_PROJECT_ID]:[YOUR_PASSWORD]@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres"
-
-# Groq API Key
-GROQ_API_KEY="gsk_your_groq_key"
-
-# Auth Secret (For signing session cookies)
-JWT_SECRET="your-random-jwt-secret-string"
-
-# SMTP Mailer Configurations
-EMAIL_USER="name@gmail.com"
-EMAIL_PASS="xxxx xxxx xxxx xxxx" # 16-character Gmail App Password (with spaces)
-```
-
-### 3. Sync Database Schema & Generate Prisma Client
-```bash
-npx prisma db push
-npx prisma generate
-```
-
-### 4. Run the Development Server
-```bash
-npm run dev
-```
-Open **[http://localhost:3000](http://localhost:3000)** in your browser!
-
----
-
 ## ☁️ Vercel Deployment
 
 This project is configured and deployed live on Vercel:
 *   **Vercel Project Link**: [lekha-harshaa-s-projects/resume-roaster](https://vercel.com/lekha-harshaa-s-projects/resume-roaster)
 
-### How to update and redeploy:
-1.  **Environment Variables**: Ensure the following variables are configured under **Settings ➔ Environment Variables** in your Vercel project dashboard:
-    *   `DATABASE_URL` (Supabase connection string)
-    *   `GROQ_API_KEY` (Groq API credentials)
-    *   `JWT_SECRET` (For signing session cookies)
-    *   `EMAIL_USER` (Sender Gmail address)
-    *   `EMAIL_PASS` (16-character SMTP App password)
-2.  **Trigger builds**: Pushing changes to your main Git branch will automatically trigger a production rebuild and live deployment on Vercel.
